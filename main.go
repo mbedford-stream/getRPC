@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -11,32 +12,29 @@ import (
 	"github.com/Juniper/go-netconf/netconf"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/term"
-	// "golang.org/x/crypto/ssh/terminal"
 )
 
-func credentials() (string, string) {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Print("Enter Username: ")
-	username, _ := reader.ReadString('\n')
-
-	fmt.Print("Enter Password: ")
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		fmt.Println("\nPassword typed: " + string(bytePassword))
-	}
-	password := string(bytePassword)
-
-	return strings.TrimSpace(username), strings.TrimSpace(password)
+// SystemInformation provides a representation of the system-information container
+type SystemInformation struct {
+	HardwareModel string `xml:"system-information>hardware-model"`
+	OsName        string `xml:"system-information>os-name"`
+	OsVersion     string `xml:"system-information>os-version"`
+	SerialNumber  string `xml:"system-information>serial-number"`
+	HostName      string `xml:"system-information>host-name"`
 }
 
-func getRPC(devIP string, devUser string, devPass string, rpcCommand string) *netconf.RPCReply {
-	sshConfig := &ssh.ClientConfig{
-		User:            devUser,
-		Auth:            []ssh.AuthMethod{ssh.Password(devPass)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         60,
-	}
+var (
+	host         = flag.String("host", "192.168.86.3", "Hostname")
+	username     = flag.String("username", "", "Username")
+	key          = flag.String("key", os.Getenv("HOME")+"/.ssh/id_rsa", "SSH private key file")
+	passphrase   = flag.String("passphrase", "", "SSH private key passphrase (cleartext)")
+	nopassphrase = flag.Bool("nopassphrase", false, "SSH private key does not contain a passphrase")
+	pubkey       = flag.Bool("pubkey", false, "Use SSH public key authentication")
+	agent        = flag.Bool("agent", false, "Use SSH agent for public key authentication")
+)
+
+func getRPC(devIP string, sshConfig *ssh.ClientConfig, rpcCommand string) *netconf.RPCReply {
+
 	fmt.Printf("Connecting: %s\n", devIP)
 	s, err := netconf.DialSSH(devIP, sshConfig)
 	if err != nil {
@@ -44,9 +42,6 @@ func getRPC(devIP string, devUser string, devPass string, rpcCommand string) *ne
 	}
 
 	defer s.Close()
-
-	// fmt.Println(s.ServerCapabilities)
-	// fmt.Println(s.SessionID)
 
 	// Sends raw XML
 	res, err2 := s.Exec(netconf.RawMethod(rpcCommand))
@@ -56,21 +51,74 @@ func getRPC(devIP string, devUser string, devPass string, rpcCommand string) *ne
 	return res
 }
 
+func BuildConfig() *ssh.ClientConfig {
+	var config *ssh.ClientConfig
+	var pass string
+	if *pubkey {
+		if *agent {
+			var err error
+			config, err = netconf.SSHConfigPubKeyAgent(*username)
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			if *nopassphrase {
+				pass = "\n"
+			} else {
+				if *passphrase != "" {
+					pass = *passphrase
+				} else {
+					var readpass []byte
+					var err error
+					fmt.Printf("Enter Passphrase for %s: ", *key)
+					readpass, err = term.ReadPassword(syscall.Stdin)
+					if err != nil {
+						log.Fatal(err)
+					}
+					pass = string(readpass)
+					fmt.Println()
+				}
+			}
+			var err error
+			config, err = netconf.SSHConfigPubKeyFile(*username, *key, pass)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	} else {
+		fmt.Printf("Enter Password: ")
+		bytePassword, err := term.ReadPassword(syscall.Stdin)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println()
+
+		config = netconf.SSHConfigPassword(*username, string(bytePassword))
+	}
+	return config
+}
+
 func main() {
+	flag.Parse()
+
+	sshConfig := BuildConfig()
+
+	fmt.Println("\nConnecting....")
+	s, err := netconf.DialSSH(*host, sshConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer s.Close()
+
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Device IP/Hostname: ")
-	devAddr, _ := reader.ReadString('\n')
-	devAddr = strings.Trim(devAddr, "\n")
-
-	User, Passwd := credentials()
-
-	reader = bufio.NewReader(os.Stdin)
 	fmt.Print("\nRPC command to send: ")
 	sendCmd, _ := reader.ReadString('\n')
 	sendCmd = strings.Trim(sendCmd, "\n")
 
+	fmt.Println(sendCmd)
+
 	fmt.Println("Calling getData function")
-	RPCreply := getRPC(devAddr, User, Passwd, sendCmd)
+	RPCreply := getRPC(*host, sshConfig, sendCmd)
 	fmt.Println("Finished getting data.... ")
 
 	fmt.Println(RPCreply)
