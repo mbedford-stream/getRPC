@@ -71,7 +71,7 @@ func BuildConfig() *ssh.ClientConfig {
 					var readpass []byte
 					var err error
 					fmt.Printf("Enter Passphrase for %s: ", *key)
-					readpass, err = term.ReadPassword(syscall.Stdin)
+					readpass, err = term.ReadPassword(int(syscall.Stdin))
 					if err != nil {
 						log.Fatal(err)
 					}
@@ -87,7 +87,7 @@ func BuildConfig() *ssh.ClientConfig {
 		}
 	} else {
 		fmt.Printf("Enter Password: ")
-		bytePassword, err := term.ReadPassword(syscall.Stdin)
+		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 		if err != nil {
 			log.Fatal(err)
 		}
