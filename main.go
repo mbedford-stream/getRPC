@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io/fs"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Juniper/go-netconf/netconf"
 	"golang.org/x/crypto/ssh"
@@ -31,6 +34,7 @@ var (
 	nopassphrase = flag.Bool("nopassphrase", false, "SSH private key does not contain a passphrase")
 	pubkey       = flag.Bool("pubkey", false, "Use SSH public key authentication")
 	agent        = flag.Bool("agent", false, "Use SSH agent for public key authentication")
+	saveoutput   = flag.Bool("save", false, "Save response to a file")
 )
 
 func getRPC(devIP string, sshConfig *ssh.ClientConfig, rpcCommand string) *netconf.RPCReply {
@@ -97,6 +101,15 @@ func BuildConfig() *ssh.ClientConfig {
 	}
 	return config
 }
+func WriteToFile(fileContent string, toFile string, perms fs.FileMode) error {
+	listBytes := []byte(fileContent)
+	err := ioutil.WriteFile(toFile, listBytes, perms)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func main() {
 	flag.Parse()
@@ -122,5 +135,14 @@ func main() {
 	fmt.Println("Finished getting data.... ")
 
 	fmt.Println(RPCreply)
+
+	if *saveoutput {
+		timeStr := time.Now().Format("Jan-06-02-15-04-05")
+		setFilename := fmt.Sprintf("%s-%s-RPC.txt", timeStr, *host)
+		writeErr := WriteToFile(RPCreply.RawReply, setFilename, 0666)
+		if writeErr != nil {
+			log.Fatal("Error writing set commands to file!")
+		}
+	}
 
 }
